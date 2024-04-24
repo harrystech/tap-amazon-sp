@@ -7,13 +7,18 @@ from typing import List
 import backoff
 import singer
 from singer import Transformer, metrics
-from sp_api.api import Orders, Sales
+from sp_api.api import Orders, Sales, ReportsV2
+from sp_api.base.reportTypes import ReportType
 from sp_api.base.exceptions import SellingApiRequestThrottledException
 from sp_api.base.marketplaces import Marketplaces
 from sp_api.base.sales_enum import Granularity
 
-from tap_amazon_sp.helpers import (create_date_interval, flatten_order_items,
-                                   format_date, log_backoff)
+from tap_amazon_sp.helpers import (
+    create_date_interval,
+    flatten_order_items,
+    format_date,
+    log_backoff,
+)
 
 LOGGER = singer.get_logger()
 
@@ -24,6 +29,7 @@ class BaseStream:
 
     :param client: The API client used extract records from the external source
     """
+
     tap_stream_id = None
     replication_method = None
     replication_key = None
@@ -35,7 +41,9 @@ class BaseStream:
     def __init__(self, config: dict) -> None:
         self.config = config
 
-    def get_records(self, start_date: str, marketplace: str, is_parent: bool = False) -> list:
+    def get_records(
+        self, start_date: str, marketplace: str, is_parent: bool = False
+    ) -> list:
         """
         Returns a list of records for that stream.
 
@@ -55,7 +63,9 @@ class BaseStream:
         """
         self.params = params
 
-    def get_parent_data(self, start_date: str = None, marketplace: Marketplaces = Marketplaces.US) -> list:
+    def get_parent_data(
+        self, start_date: str = None, marketplace: Marketplaces = Marketplaces.US
+    ) -> list:
         """
         Returns a list of records from the parent stream.
 
@@ -71,12 +81,9 @@ class BaseStream:
         :return: A dictionary with secrets
         """
         return {
-            'refresh_token': self.config['refresh_token'],
-            'lwa_app_id': self.config['client_id'],
-            'lwa_client_secret': self.config['client_secret'],
-            'aws_access_key': self.config['aws_access_key'],
-            'aws_secret_key': self.config['aws_secret_key'],
-            'role_arn': self.config['role_arn'],
+            "refresh_token": self.config["refresh_token"],
+            "lwa_app_id": self.config["client_id"],
+            "lwa_client_secret": self.config["client_secret"],
         }
 
     def get_marketplaces(self) -> List[Marketplaces]:
@@ -85,7 +92,7 @@ class BaseStream:
 
         :return: A list of marketplace enums for the marketplace(s) to be used with the API
         """
-        marketplaces = self.config.get('marketplaces')
+        marketplaces = self.config.get("marketplaces")
         cleaned_marketplaces = []
         if marketplaces:
             marketplaces_arr = marketplaces.strip().split(" ")
@@ -103,8 +110,10 @@ class BaseStream:
                         if not mp.startswith("__"):
                             valid_marketplaces.add(mp)
                     # pylint: disable=logging-fstring-interpolation
-                    LOGGER.critical(f"provided marketplace '{marketplace}' is not "
-                                    f"in Marketplaces set: {valid_marketplaces}")
+                    LOGGER.critical(
+                        f"provided marketplace '{marketplace}' is not "
+                        f"in Marketplaces set: {valid_marketplaces}"
+                    )
 
                     raise e
 
@@ -118,7 +127,7 @@ class BaseStream:
 
         :return: An enum for the granularity to be used with the API
         """
-        granularity = self.config.get('sales_data_granularity')
+        granularity = self.config.get("sales_data_granularity")
         if granularity:
             granularity = granularity.upper()
             if hasattr(Granularity, granularity):
@@ -130,8 +139,10 @@ class BaseStream:
                 if not mp.startswith("__"):
                     valid_granularities.add(mp)
             # pylint: disable=logging-fstring-interpolation
-            LOGGER.critical(f"provided granularity '{granularity}' is not "
-                            f"in Granularity set: {valid_granularities}")
+            LOGGER.critical(
+                f"provided granularity '{granularity}' is not "
+                f"in Granularity set: {valid_granularities}"
+            )
 
             raise Exception
 
@@ -145,10 +156,17 @@ class IncrementalStream(BaseStream):
 
     :param client: The API client used extract records from the external source
     """
-    replication_method = 'INCREMENTAL'
+
+    replication_method = "INCREMENTAL"
     batched = False
 
-    def sync(self, state: dict, stream_schema: dict, stream_metadata: dict, transformer: Transformer) -> dict:
+    def sync(
+        self,
+        state: dict,
+        stream_schema: dict,
+        stream_metadata: dict,
+        transformer: Transformer,
+    ) -> dict:
         """
         The sync logic for an incremental stream.
 
@@ -160,7 +178,9 @@ class IncrementalStream(BaseStream):
         """
         marketplaces = self.get_marketplaces()
         for marketplace in marketplaces:
-            start_date = singer.get_bookmark(state, self.tap_stream_id, marketplace.name, self.config['start_date'])
+            start_date = singer.get_bookmark(
+                state, self.tap_stream_id, marketplace.name, self.config["start_date"]
+            )
 
             # Value in state will be in the form {replication_key: value}
             if isinstance(start_date, dict):
@@ -169,17 +189,33 @@ class IncrementalStream(BaseStream):
 
             with metrics.record_counter(self.tap_stream_id) as counter:
                 for record in self.get_records(start_date, marketplace):
-                    transformed_record = transformer.transform(record, stream_schema, stream_metadata)
-                    record_replication_value = singer.utils.strptime_to_utc(transformed_record[self.replication_key])
-                    if record_replication_value >= singer.utils.strptime_to_utc(max_record_value):
+                    transformed_record = transformer.transform(
+                        record, stream_schema, stream_metadata
+                    )
+                    record_replication_value = singer.utils.strptime_to_utc(
+                        transformed_record[self.replication_key]
+                    )
+                    if record_replication_value >= singer.utils.strptime_to_utc(
+                        max_record_value
+                    ):
                         singer.write_record(self.tap_stream_id, transformed_record)
                         counter.increment()
                         max_record_value = record_replication_value.isoformat()
 
-                        state = singer.write_bookmark(state, self.tap_stream_id, marketplace.name, {self.replication_key: max_record_value})
+                        state = singer.write_bookmark(
+                            state,
+                            self.tap_stream_id,
+                            marketplace.name,
+                            {self.replication_key: max_record_value},
+                        )
                         singer.write_state(state)
 
-            state = singer.write_bookmark(state, self.tap_stream_id, marketplace.name, {self.replication_key: max_record_value})
+            state = singer.write_bookmark(
+                state,
+                self.tap_stream_id,
+                marketplace.name,
+                {self.replication_key: max_record_value},
+            )
             singer.write_state(state)
         return state
 
@@ -191,9 +227,16 @@ class FullTableStream(BaseStream):
 
     :param client: The API client used extract records from the external source
     """
-    replication_method = 'FULL_TABLE'
 
-    def sync(self, state: dict, stream_schema: dict, stream_metadata: dict, transformer: Transformer) -> dict:
+    replication_method = "FULL_TABLE"
+
+    def sync(
+        self,
+        state: dict,
+        stream_schema: dict,
+        stream_metadata: dict,
+        transformer: Transformer,
+    ) -> dict:
         """
         The sync logic for an full table stream.
 
@@ -204,8 +247,13 @@ class FullTableStream(BaseStream):
         :return: State data in the form of a dictionary
         """
         with metrics.record_counter(self.tap_stream_id) as counter:
-            for record in self.get_records():
-                transformed_record = transformer.transform(record, stream_schema, stream_metadata)
+            records = self.get_records()
+            LOGGER.info(f"Records type: {type(records)}")
+            for record in records:
+                LOGGER.info(f"Record: {record}")
+                transformed_record = transformer.transform(
+                    record, stream_schema, stream_metadata
+                )
                 singer.write_record(self.tap_stream_id, transformed_record)
                 counter.increment()
 
@@ -217,24 +265,28 @@ class OrdersStream(IncrementalStream):
     """
     Gets records for orders stream.
     """
-    tap_stream_id = 'orders'
-    key_properties = ['AmazonOrderId']
-    replication_key = 'LastUpdateDate'
-    valid_replication_keys = ['LastUpdateDate']
+
+    tap_stream_id = "orders"
+    key_properties = ["AmazonOrderId"]
+    replication_key = "LastUpdateDate"
+    valid_replication_keys = ["LastUpdateDate"]
 
     @staticmethod
     @lru_cache
-    @backoff.on_exception(backoff.expo,
-                          SellingApiRequestThrottledException,
-                          max_tries=5,
-                          base=3,
-                          factor=20,
-                          on_backoff=log_backoff)
+    @backoff.on_exception(
+        backoff.expo,
+        SellingApiRequestThrottledException,
+        max_tries=5,
+        base=3,
+        factor=20,
+        on_backoff=log_backoff,
+    )
     def get_orders(client, start_date, next_token, timer):
 
         try:
-            response = client.get_orders(LastUpdatedAfter=start_date,
-                                 NextToken=next_token)
+            response = client.get_orders(
+                LastUpdatedAfter=start_date, NextToken=next_token
+            )
             timer.tags[metrics.Tag.http_status_code] = 200
             return response
         except SellingApiRequestThrottledException as e:
@@ -253,7 +305,7 @@ class OrdersStream(IncrementalStream):
         paginate = True
         next_token = None
 
-        with metrics.http_request_timer('/orders/v0/orders') as timer:
+        with metrics.http_request_timer("/orders/v0/orders") as timer:
             while paginate:
                 response = self.get_orders(client, start_date, next_token, timer)
 
@@ -261,30 +313,35 @@ class OrdersStream(IncrementalStream):
                 paginate = True if next_token else False
 
                 if is_parent:
-                    yield from ((item['AmazonOrderId'], item['LastUpdateDate'])
-                                for item in response.payload['Orders'])
+                    yield from (
+                        (item["AmazonOrderId"], item["LastUpdateDate"])
+                        for item in response.payload["Orders"]
+                    )
                     continue
 
-                yield from response.payload['Orders']
+                yield from response.payload["Orders"]
 
 
 class OrderItems(IncrementalStream):
     """
     Gets records for order items stream.
     """
-    tap_stream_id = 'order_items'
-    key_properties = ['AmazonOrderId', 'OrderItemId']
-    replication_key = 'OrderLastUpdateDate'
-    valid_replication_keys = ['OrderLastUpdateDate']
+
+    tap_stream_id = "order_items"
+    key_properties = ["AmazonOrderId", "OrderItemId"]
+    replication_key = "OrderLastUpdateDate"
+    valid_replication_keys = ["OrderLastUpdateDate"]
     parent = OrdersStream
 
     @staticmethod
-    @backoff.on_exception(backoff.expo,
-                          SellingApiRequestThrottledException,
-                          max_tries=5,
-                          base=3,
-                          factor=10,
-                          on_backoff=log_backoff)
+    @backoff.on_exception(
+        backoff.expo,
+        SellingApiRequestThrottledException,
+        max_tries=5,
+        base=3,
+        factor=10,
+        on_backoff=log_backoff,
+    )
     def get_order_items(client: Orders, order_id: str):
         return client.get_order_items(order_id=order_id).payload
 
@@ -297,7 +354,9 @@ class OrderItems(IncrementalStream):
 
         client = Orders(credentials=credentials, marketplace=marketplace)
         for order_id, date in self.get_parent_data(start_date, marketplace):
-            with metrics.http_request_timer(f'/orders/v0/orders/{order_id}/orderItems') as timer:
+            with metrics.http_request_timer(
+                f"/orders/v0/orders/{order_id}/orderItems"
+            ) as timer:
                 response = self.get_order_items(client, order_id)
                 timer.tags[metrics.Tag.http_status_code] = 200
 
@@ -313,18 +372,23 @@ class SalesStream(IncrementalStream):
     """
     Gets records for sales stream.
     """
-    tap_stream_id = 'sales'
-    key_properties = ['interval']
-    replication_key = 'retrieved'
-    valid_replication_keys = ['retrieved']
 
-    @backoff.on_exception(backoff.expo,
-                          SellingApiRequestThrottledException,
-                          max_tries=3,
-                          on_backoff=log_backoff)
+    tap_stream_id = "sales"
+    key_properties = ["interval"]
+    replication_key = "retrieved"
+    valid_replication_keys = ["retrieved"]
+
+    @backoff.on_exception(
+        backoff.expo,
+        SellingApiRequestThrottledException,
+        max_tries=3,
+        on_backoff=log_backoff,
+    )
     def get_sales_data(self, client, interval, granularity, timer):
         try:
-            response = client.get_order_metrics(interval=interval, granularity=granularity)
+            response = client.get_order_metrics(
+                interval=interval, granularity=granularity
+            )
             timer.tags[metrics.Tag.http_status_code] = 200
             return response
         except SellingApiRequestThrottledException as e:
@@ -348,7 +412,7 @@ class SalesStream(IncrementalStream):
         next_token = None
         interval = create_date_interval(start_date_dt, end_date_dt)
 
-        with metrics.http_request_timer('/sales/v1/orderMetrics') as timer:
+        with metrics.http_request_timer("/sales/v1/orderMetrics") as timer:
             while paginate:
                 response = self.get_sales_data(client, interval, granularity, timer)
 
@@ -356,13 +420,161 @@ class SalesStream(IncrementalStream):
                 paginate = True if next_token else False
 
                 for record in response.payload:
-                    record.update({'retrieved': end_date})
+                    record.update({"retrieved": end_date})
 
                 yield from response.payload
 
 
+# call create report api
+# poll and check if report is ready
+# download report (read it in flight instead of downloading it to disk (security reasons))
+# parse report and yield records
+
+
+class CreateReportStream(FullTableStream):
+
+    tap_stream_id = "create_report"
+
+    @staticmethod
+    @lru_cache
+    @backoff.on_exception(
+        backoff.expo,
+        SellingApiRequestThrottledException,
+        max_tries=5,
+        base=3,
+        factor=20,
+        on_backoff=log_backoff,
+    )
+    def create_report_api(client: ReportsV2, report_options: dict, start_date, next_token, timer):
+
+        try:
+            response = client.create_report(
+                reportType=ReportType.GET_VENDOR_SALES_REPORT,
+                dataStartTime=start_date,
+                marketplaceIds=[Marketplaces.US.marketplace_id],
+                reportOptions=report_options
+            )
+            timer.tags[metrics.Tag.http_status_code] = 200
+            return response
+        except SellingApiRequestThrottledException as e:
+            timer.tags[metrics.Tag.http_status_code] = 429
+
+            raise e
+
+    def get_records(self, is_parent=False):
+        credentials = self.get_credentials()
+        start_date = format_date(self.config["start_date"])
+        marketplace = Marketplaces.US
+
+        LOGGER.info(f"Getting records for marketplace: {marketplace.name}")
+
+        client = ReportsV2(credentials=credentials, marketplace=marketplace)
+        paginate = True
+        next_token = None
+        report_options = {
+                "reportPeriod" : "DAY",
+                "sellingProgram" : "RETAIL",
+                "distributorView" : "MANUFACTURING"
+                }
+
+        with metrics.http_request_timer("/reports/2021-06-30/reports") as timer:
+            while paginate:
+                response = self.create_report_api(
+                    client=client,
+                    report_options=report_options,
+                    start_date=start_date,
+                    next_token=next_token,
+                    timer=timer,
+                )
+
+                LOGGER.info(f"Report created: {response}")
+
+                next_token = response.next_token
+                paginate = True if next_token else False
+
+                if is_parent:
+                    yield (response.payload["reportId"])
+                    continue
+
+                yield response.payload
+
+
+class GetReportStream(FullTableStream):
+    tap_stream_id = "get_report"
+    parent = CreateReportStream
+
+    @staticmethod
+    @lru_cache
+    @backoff.on_exception(
+        backoff.expo,
+        SellingApiRequestThrottledException,
+        max_tries=5,
+        base=3,
+        factor=20,
+        on_backoff=log_backoff,
+    )
+    def get_report_by_id(client: ReportsV2, report_id, start_date, next_token, timer):
+
+        try:
+            response = client.get_report(reportId=report_id)
+            timer.tags[metrics.Tag.http_status_code] = 200
+            return response
+        except SellingApiRequestThrottledException as e:
+            timer.tags[metrics.Tag.http_status_code] = 429
+
+            raise e
+
+    def get_records(self, is_parent=False):
+        credentials = self.get_credentials()
+        start_date = format_date(self.config["start_date"])
+        marketplace = Marketplaces.US
+
+        LOGGER.info(f"Getting records for marketplace: {marketplace.name}")
+
+        client = ReportsV2(credentials=credentials, marketplace=marketplace)
+        paginate = True
+        next_token = None
+        report_id = "106418019837"
+
+        for report_id in self.get_parent_data(start_date, marketplace):
+            with metrics.http_request_timer(
+                f"/reports/2021-06-30/reports/{report_id}"
+            ) as timer:
+                while paginate:
+                    response = self.get_report_by_id(
+                        client=client,
+                        report_id=report_id,
+                        start_date=start_date,
+                        next_token=next_token,
+                        timer=timer,
+                    )
+
+                    LOGGER.info(f"get report id response: {response}")
+
+                    LOGGER.info(f"get report id payload: {response.payload}")
+
+                    next_token = response.next_token
+                    paginate = True if next_token else False
+
+                    yield response.payload
+
+
 STREAMS = {
-    'orders': OrdersStream,
-    'order_items': OrderItems,
-    'sales': SalesStream,
+    "orders": OrdersStream,
+    "order_items": OrderItems,
+    "sales": SalesStream,
+    "create_report": CreateReportStream,
+    "get_report": GetReportStream,
 }
+
+# MANUFACTURING 
+# RETAIL 
+
+# MANUFACTURING 
+# BUSINESS
+
+# SOURCING
+# RETAIL 
+
+# SOURCING
+# BUSINESS

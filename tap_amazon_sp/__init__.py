@@ -8,9 +8,9 @@ REQUIRED_CONFIG_KEYS = [
     "refresh_token",
     "client_id",
     "client_secret",
-    "aws_access_key",
-    "aws_secret_key",
-    "role_arn",
+    # "aws_access_key",
+    # "aws_secret_key",
+    # "role_arn",
     "start_date",
 ]
 LOGGER = singer.get_logger()
