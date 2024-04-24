@@ -1,0 +1,59 @@
+{
+    "type": "object",
+    "properties": {
+      "marketplaceIds": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "optional": true
+      },
+      "reportId": {
+        "type": "string",
+        "required": true
+      },
+      "reportType": {
+        "type": "string",
+        "required": true
+      },
+      "dataStartTime": {
+        "type": "string",
+        "format": "date-time",
+        "optional": true
+      },
+      "dataEndTime": {
+        "type": "string",
+        "format": "date-time",
+        "optional": true
+      },
+      "reportScheduleId": {
+        "type": "string",
+        "optional": true
+      },
+      "createdTime": {
+        "type": "string",
+        "format": "date-time",
+        "required": true
+      },
+      "processingStatus": {
+        "type": "string",
+        "enum": ["CANCELLED", "DONE", "FATAL", "IN_PROGRESS", "IN_QUEUE"],
+        "required": true
+      },
+      "processingStartTime": {
+        "type": "string",
+        "format": "date-time",
+        "optional": true
+      },
+      "processingEndTime": {
+        "type": "string",
+        "format": "date-time",
+        "optional": true
+      },
+      "reportDocumentId": {
+        "type": "string",
+        "optional": true
+      }
+    }
+  }
+  
